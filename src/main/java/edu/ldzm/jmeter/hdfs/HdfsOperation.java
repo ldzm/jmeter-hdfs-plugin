@@ -1,7 +1,12 @@
 package edu.ldzm.jmeter.hdfs;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.Date;
 
 import org.apache.commons.lang3.StringUtils;
@@ -82,6 +87,8 @@ public class HdfsOperation extends ResultCollector {
 						+ filename);
 				hdfsFileSystem.copyFromLocalFile(from, to);
 				log.info("put file:" + from.getName() + " to hdfs successful!");
+				desFile.delete();
+				log.info("delete " + desFile.getAbsolutePath() + " successful!");
 			} else {
 				log.info("namenod,input file,output file and interval can not be null.");
 			}
@@ -118,6 +125,10 @@ public class HdfsOperation extends ResultCollector {
 			endNum = 0L;
 		}
 		
+		File nameListFile = new File(getInputFilePath().trim());
+		nameListFile = new File(nameListFile.getParent() + "\namelistfile.txt");
+		saveNameList(nameListFile);
+		
 		lastTimeMillis = System.currentTimeMillis();
 		
 		new Thread(new Runnable() {
@@ -140,6 +151,33 @@ public class HdfsOperation extends ResultCollector {
 				}
 			}
 		}).start();
+	}
+
+	private void saveNameList(File nameListFile) {
+		if (!nameListFile.exists()) {
+			try {
+				nameListFile.createNewFile();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+		OutputStream out = null;
+		try {
+			out = new FileOutputStream(nameListFile);
+			try {
+				out.write(printableFieldNamesToString().getBytes());
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		} finally {
+			try {
+				out.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
 	}
 
 	@Override
