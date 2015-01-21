@@ -17,7 +17,8 @@ import org.apache.jmeter.save.CSVSaveService;
 import org.apache.jorphan.logging.LoggingManager;
 import org.apache.log.Logger;
 
-import edu.ldzm.utils.DateUtils;
+import edu.ldzm.utils.DateUtil;
+import edu.ldzm.utils.FileUtil;
 import edu.ldzm.utils.Partion;
 
 public class HdfsOperation extends ResultCollector {
@@ -30,17 +31,36 @@ public class HdfsOperation extends ResultCollector {
 	public static final String INPUT_FILE_PATH = "inputFilePathTextField";
 	public static final String OUTPUT_FILE_PATH = "outputFilePathTextField";
 	public static final String INTERVAL = "intervalTextField";
+	
+	public static final int CONNECT_TIMES = 10;
 
 	private boolean running = true;
 	public static long beginNum = 0L;
 	public static long endNum = 0L;
-	public static long lastTimeMillis = 0L;
+	public static long lastTimeMillis = System.currentTimeMillis();
 
 	private boolean copyFileToHDFS() {
 
 		FileSystem hdfsFileSystem = null;
 		Configuration config = new Configuration();
 		Exception exception = null;
+		config.set("fs.default.name", this.getNameNode().trim());
+		
+		for (int i = 0; i < CONNECT_TIMES; i++) {
+			try {
+				hdfsFileSystem = FileSystem.get(config);
+			} catch (IOException e1) {
+				exception = e1;
+				e1.printStackTrace();
+			}
+			if (null != hdfsFileSystem) {
+				break;
+			}
+		}
+		
+		if (null == hdfsFileSystem) {
+			log.error("Connect to FileSystem failure.");
+		}
 
 		try {
 			if (StringUtils.isNotBlank(this.getNameNode())
@@ -48,24 +68,17 @@ public class HdfsOperation extends ResultCollector {
 					&& StringUtils.isNotBlank(this.getOutputFilePath())
 					&& StringUtils.isNotBlank(getInterval())) {
 
-				config.set("fs.default.name", this.getNameNode().trim());
-				hdfsFileSystem = FileSystem.get(config);
-
 				// create tmp directory
 				File file = new File("/tmp/jmeter-plugin-"
-						+ DateUtils.date2String(new Date()));
-				if (file.mkdirs()) {
-					log.info("make tmp dirctory" + file.getAbsolutePath()
-							+ " successful!");
-				} else {
-					log.error("make tmp dirctory" + file.getAbsolutePath()
-							+ " failure!");
-				}
+						+ DateUtil.date2String(new Date()));
+				FileUtil.createDir(file);
 
-				String filename = "jmeter-" + DateUtils.date2String(new Date())
+				String filename = "jmeter-" + DateUtil.date2String(new Date())
 						+ ".txt";
 				File srcFile = new File(this.getInputFilePath().trim());
 				File desFile = new File(file.getAbsoluteFile() + "/" + filename);
+				FileUtil.createFile(desFile);
+				
 				Partion partion = new Partion();
 
 				endNum = partion.getLines(srcFile) - 1;
@@ -76,19 +89,21 @@ public class HdfsOperation extends ResultCollector {
 					} else {
 						log.error("file partion failure.");
 					}
+					
+					Path from = new Path(desFile.getAbsolutePath());
+					Path to = new Path(this.getOutputFilePath().trim() + "/"
+							+ filename);
+					hdfsFileSystem.copyFromLocalFile(from, to);
+					log.info("put file:" + from.getName() + " to hdfs successful!");
+					desFile.delete();
+					log.info("delete " + desFile.getAbsolutePath() + " successful!");
 				} else {
 					log.info(srcFile.getAbsolutePath() + " isn't update!");
+					return false;
 				}
-
-				Path from = new Path(desFile.getAbsolutePath());
-				Path to = new Path(this.getOutputFilePath().trim() + "/"
-						+ filename);
-				hdfsFileSystem.copyFromLocalFile(from, to);
-				log.info("put file:" + from.getName() + " to hdfs successful!");
-				desFile.delete();
-				log.info("delete " + desFile.getAbsolutePath() + " successful!");
 			} else {
 				log.info("namenod,input file,output file and interval can not be null.");
+				return false;
 			}
 		} catch (Exception e) {
 			exception = e;
@@ -107,7 +122,7 @@ public class HdfsOperation extends ResultCollector {
 
 		return true;
 	}
-
+	
 	@Override
 	public void testStarted() {
 		super.testStarted();
@@ -124,9 +139,11 @@ public class HdfsOperation extends ResultCollector {
 		}
 		
 		File nameListFile = new File(getInputFilePath().trim());
-		nameListFile = new File(nameListFile.getParent() + "\namelistfile.txt");
+		nameListFile = new File(nameListFile.getParent() + "/namelistfile.txt");
 		saveNameList(nameListFile);
 		
+		final int seconds = Integer.parseInt(getInterval().trim());
+		log.info("interval seconds: " +seconds);
 		lastTimeMillis = System.currentTimeMillis();
 		
 		new Thread(new Runnable() {
@@ -135,15 +152,12 @@ public class HdfsOperation extends ResultCollector {
 			public void run() {
 				while (running) {
 					long currentTimeMillis = System.currentTimeMillis();
-					int seconds = Integer.parseInt(getInterval().trim());
-					log.info("interval seconds: " +seconds);
-					if (currentTimeMillis - lastTimeMillis > 1000 * 60 * seconds) {
+
+					if (currentTimeMillis - lastTimeMillis > 1000 * seconds) {
 						lastTimeMillis = currentTimeMillis;
 						
 						if (copyFileToHDFS()) {
 							log.info("put file to hdfs successful!");
-						} else {
-							log.info("put file to fdfs failure!");
 						}
 					}
 				}
@@ -152,13 +166,8 @@ public class HdfsOperation extends ResultCollector {
 	}
 
 	private void saveNameList(File nameListFile) {
-		if (!nameListFile.exists()) {
-			try {
-				nameListFile.createNewFile();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-		}
+		
+		FileUtil.createFile(nameListFile);
 		OutputStream out = null;
 		try {
 			out = new FileOutputStream(nameListFile);
@@ -167,6 +176,7 @@ public class HdfsOperation extends ResultCollector {
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
+			log.info("save file head to " + nameListFile.getAbsolutePath() + " successful.");
 		} catch (FileNotFoundException e) {
 			e.printStackTrace();
 		} finally {
@@ -186,13 +196,11 @@ public class HdfsOperation extends ResultCollector {
 
 		if (copyFileToHDFS()) {
 			log.info("put file to hdfs successful!");
-		} else {
-			log.info("put file to fdfs failure!");
 		}
 		
 		beginNum = 0L;
 		endNum = 0L;
-		lastTimeMillis = 0L;
+		lastTimeMillis = System.currentTimeMillis();
 	}
 
 	public String printableFieldNamesToString() {

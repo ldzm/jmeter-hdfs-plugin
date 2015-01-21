@@ -204,6 +204,14 @@ public class HdfsOperationGui extends AbstractVisualizer implements Clearable, A
     }
 
     @Override
+    public TestElement createTestElement() {
+
+    	HdfsOperation operation = new HdfsOperation();
+    	modifyTestElement(operation);
+    	return operation;
+    }
+    
+    @Override
     public void modifyTestElement(TestElement c) {
         super.modifyTestElement(c);
         c.setProperty(USE_GROUP_NAME, useGroupName.isSelected(), false);
