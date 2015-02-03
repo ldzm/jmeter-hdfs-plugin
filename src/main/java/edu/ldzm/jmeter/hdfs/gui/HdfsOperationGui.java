@@ -48,6 +48,10 @@ public class HdfsOperationGui extends AbstractVisualizer implements Clearable, A
     private JTextField inputFilePathTextField;
     private JTextField outputFilePathTextField;
     private JTextField intervalTextField;
+    
+    private JTextField hadoopCmdPathTextField;
+    private JTextField jobPathTextField;
+    private JTextField exeHadoopTaskIntervalTextField;
 	
     private static final String USE_GROUP_NAME = "useGroupName"; //$NON-NLS-1$
 
@@ -128,6 +132,14 @@ public class HdfsOperationGui extends AbstractVisualizer implements Clearable, A
                 new Class[] { String.class, Long.class, Long.class, Long.class, Long.class,
                               String.class, String.class, String.class, String.class, String.class });
         clearData();
+        namenodTextField = new JTextField(10);
+        inputFilePathTextField = new JTextField(10);
+        outputFilePathTextField = new JTextField(10);
+        intervalTextField = new JTextField(10);
+        
+        hadoopCmdPathTextField = new JTextField(10);
+        jobPathTextField = new JTextField(10);
+        exeHadoopTaskIntervalTextField = new JTextField(10);
         init();
     }
 
@@ -201,6 +213,10 @@ public class HdfsOperationGui extends AbstractVisualizer implements Clearable, A
         this.inputFilePathTextField.setText(el.getPropertyAsString(HdfsOperation.INPUT_FILE_PATH));
         this.outputFilePathTextField.setText(el.getPropertyAsString(HdfsOperation.OUTPUT_FILE_PATH));
         this.intervalTextField.setText(el.getPropertyAsString(HdfsOperation.INTERVAL));
+        
+        this.hadoopCmdPathTextField.setText(el.getPropertyAsString(HdfsOperation.HADOOP_CMD_PATH));
+        this.jobPathTextField.setText(el.getPropertyAsString(HdfsOperation.JOB_PATH));
+        this.exeHadoopTaskIntervalTextField.setText(el.getPropertyAsString(HdfsOperation.EXE_HADOOP_TASK_INTERVAL));
     }
 
     @Override
@@ -216,10 +232,17 @@ public class HdfsOperationGui extends AbstractVisualizer implements Clearable, A
         super.modifyTestElement(c);
         c.setProperty(USE_GROUP_NAME, useGroupName.isSelected(), false);
         c.setProperty(SAVE_HEADERS, saveHeaders.isSelected(), true);
+        String naString = HdfsOperation.NAME_NODE;
+        String tString = this.namenodTextField.getText();
+        c.setProperty(naString, tString);
         c.setProperty(HdfsOperation.NAME_NODE, this.namenodTextField.getText());
         c.setProperty(HdfsOperation.INPUT_FILE_PATH, this.inputFilePathTextField.getText());
         c.setProperty(HdfsOperation.OUTPUT_FILE_PATH, this.outputFilePathTextField.getText());
         c.setProperty(HdfsOperation.INTERVAL, this.intervalTextField.getText());
+
+        c.setProperty(HdfsOperation.HADOOP_CMD_PATH, this.hadoopCmdPathTextField.getText());
+        c.setProperty(HdfsOperation.JOB_PATH, this.jobPathTextField.getText());
+        c.setProperty(HdfsOperation.EXE_HADOOP_TASK_INTERVAL, this.exeHadoopTaskIntervalTextField.getText());
     }
 
     private void init() {
@@ -231,14 +254,21 @@ public class HdfsOperationGui extends AbstractVisualizer implements Clearable, A
         
         Box paramBox = Box.createVerticalBox();
         paramBox.setBorder(BorderFactory.createTitledBorder("Put File to HDFS"));
-        paramBox.add(createNamenodePanel());
-        paramBox.add(createInputFilePathPanel());
-        paramBox.add(createOnputFilePathPanel());
-        paramBox.add(createIntervalPanel());
+        paramBox.add(createPanel(new JLabel("Namenode:"), HdfsOperation.NAME_NODE, namenodTextField));
+        paramBox.add(createPanel(new JLabel("Input File Path:"), HdfsOperation.INPUT_FILE_PATH, inputFilePathTextField));
+        paramBox.add(createPanel(new JLabel("Out File Path:"), HdfsOperation.OUTPUT_FILE_PATH, outputFilePathTextField));
+        paramBox.add(createPanel(new JLabel("Interval(s):"), HdfsOperation.INTERVAL, intervalTextField));
         
-        box.add(paramBox);  
+        Box hadoopParamBox = Box.createVerticalBox();
+        hadoopParamBox.setBorder(BorderFactory.createTitledBorder("Hadoop CMD"));
+        hadoopParamBox.add(createPanel(new JLabel("Hadoop Cmd Path:"), HdfsOperation.HADOOP_CMD_PATH, hadoopCmdPathTextField));
+        hadoopParamBox.add(createPanel(new JLabel("Job Path:"), HdfsOperation.JOB_PATH, jobPathTextField));
+        hadoopParamBox.add(createPanel(new JLabel("Execute Hadoop Task Interval(s)"), HdfsOperation.EXE_HADOOP_TASK_INTERVAL, exeHadoopTaskIntervalTextField));
+        
+        box.add(paramBox);
+        box.add(hadoopParamBox);
         this.add(box, BorderLayout.NORTH);
-
+        
         myJTable = new JTable(model);
         myJTable.getTableHeader().setDefaultRenderer(new HeaderAsPropertyRenderer());
         myJTable.setPreferredScrollableViewportSize(new Dimension(500, 70));
@@ -254,57 +284,17 @@ public class HdfsOperationGui extends AbstractVisualizer implements Clearable, A
         this.add(opts,BorderLayout.SOUTH);
     }
     
-    private JPanel createNamenodePanel() {
-    	JLabel namenodeLabel = new JLabel("Namenode"); 
-    	namenodTextField = new JTextField(10);
-    	namenodTextField.setName(HdfsOperation.NAME_NODE);
-    	namenodeLabel.setLabelFor(namenodTextField);
-    	
-    	JPanel namenodePanel = new JPanel(new BorderLayout(5, 0));
-    	namenodePanel.add(namenodeLabel, BorderLayout.WEST);
-    	namenodePanel.add(namenodTextField, BorderLayout.CENTER);
-    	
-        return namenodePanel;
-    }
-    
-    private JPanel createInputFilePathPanel() {
-    	JLabel inputFilePathLabel = new JLabel("Input File Path"); 
-    	inputFilePathTextField = new JTextField(10);
-    	inputFilePathTextField.setName(HdfsOperation.INPUT_FILE_PATH);
-    	inputFilePathLabel.setLabelFor(inputFilePathTextField);
-    	
-    	JPanel inputFilePathPanel = new JPanel(new BorderLayout(5, 0));
-    	inputFilePathPanel.add(inputFilePathLabel, BorderLayout.WEST);
-    	inputFilePathPanel.add(inputFilePathTextField, BorderLayout.CENTER);
-    	
-        return inputFilePathPanel;
-    }
-    
-    private JPanel createOnputFilePathPanel() {
-    	JLabel outputFilePathLabel = new JLabel("Out File Path"); 
-    	outputFilePathTextField = new JTextField(10);
-    	outputFilePathTextField.setName(HdfsOperation.OUTPUT_FILE_PATH);
-    	outputFilePathLabel.setLabelFor(outputFilePathTextField);
-    	
-    	JPanel onputFilePathPanel = new JPanel(new BorderLayout(5, 0));
-    	onputFilePathPanel.add(outputFilePathLabel, BorderLayout.WEST);
-    	onputFilePathPanel.add(outputFilePathTextField, BorderLayout.CENTER);
-    	
-        return onputFilePathPanel;
-    }
-    private JPanel createIntervalPanel() {
-    	JLabel intervalLabel = new JLabel("Interval Seconds"); 
-    	intervalTextField = new JTextField(10);
-    	intervalTextField.setName(HdfsOperation.INTERVAL);
-    	intervalLabel.setLabelFor(intervalTextField);
+    private JPanel createPanel(JLabel label, String textFieldName, JTextField textField) {
 
-    	JPanel intervalPanel = new JPanel(new BorderLayout(5, 0));
-    	intervalPanel.add(intervalLabel, BorderLayout.WEST);
-    	intervalPanel.add(intervalTextField, BorderLayout.CENTER);
-    	
-        return intervalPanel;
-    }
+    	textField.setName(textFieldName);
+    	label.setLabelFor(textField);
 
+    	JPanel panel = new JPanel(new BorderLayout(5, 0));
+    	panel.add(label, BorderLayout.WEST);
+    	panel.add(textField, BorderLayout.CENTER);
+    	
+        return panel;
+    }
     @Override
     public void actionPerformed(ActionEvent ev) {
         if (ev.getSource() == saveTable) {

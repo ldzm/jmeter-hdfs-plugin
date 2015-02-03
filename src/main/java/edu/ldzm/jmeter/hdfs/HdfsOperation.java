@@ -5,7 +5,9 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -17,6 +19,7 @@ import org.apache.jmeter.save.CSVSaveService;
 import org.apache.jorphan.logging.LoggingManager;
 import org.apache.log.Logger;
 
+import edu.ldzm.jmeter.hdfs.service.HdfsService;
 import edu.ldzm.utils.DateUtil;
 import edu.ldzm.utils.FileUtil;
 import edu.ldzm.utils.Partion;
@@ -32,32 +35,141 @@ public class HdfsOperation extends ResultCollector {
 	public static final String OUTPUT_FILE_PATH = "outputFilePathTextField";
 	public static final String INTERVAL = "intervalTextField";
 	
+    public static final String HADOOP_CMD_PATH = "hadoopCmdPathTextField";
+    public static final String JOB_PATH = "jobPathTextField";
+    public static final String EXE_HADOOP_TASK_INTERVAL = "exeHadoopTaskIntervalTextField";
+	
 	public static final int CONNECT_TIMES = 10;
 
-	private boolean running = true;
+	private static File tmpDir = new File("/tmp/jmeter-plugin-" + DateUtil.date2String(new Date()));
+	private static String tmpHdfsPathDir = DateUtil.date2String(new Date());
+	private static boolean running = true;
 	public static long beginNum = 0L;
 	public static long endNum = 0L;
 	public static long lastTimeMillis = System.currentTimeMillis();
+	public static long exeHadoopTasklastTimeMillis = System.currentTimeMillis();
+	
+	public HdfsOperation() {
+		super();
+		FileUtil.createDir(tmpDir);
+	}
+	
+	public String printableFieldNamesToString() {
+		return this.printableFieldNamesToString(super.getSaveConfig());
+	}
+
+	/**
+	 * print file head list
+	 * 
+	 * @param c
+	 *            the configurations you selected
+	 * @return
+	 */
+	public String printableFieldNamesToString(SampleSaveConfiguration c) {
+		return CSVSaveService.printableFieldNamesToString(c);
+	}
+
+	@Override
+	public void testStarted() {
+		super.testStarted();
+		running = true;
+		
+		Partion partion = new Partion();
+		long lines = partion.getLines(new File(getInputFilePath()));
+		if (lines > 0) {
+			beginNum = lines + 1;
+			endNum = lines;
+		} else {
+			beginNum = 1L;
+			endNum = 0L;
+		}
+		
+		
+		final int seconds = Integer.parseInt(getInterval().trim());
+		final int exeHadoopTaskseconds = Integer.parseInt(getExeHadoopTaskInterval().trim());
+		tmpHdfsPathDir = DateUtil.date2String(new Date());
+		final List<String> args = new ArrayList<String>();
+		args.add("-l");
+		args.add(printableFieldNamesToString());
+		args.add("-i");
+		args.add(exeHadoopTaskseconds + "");
+		
+		log.info("interval seconds: " +seconds + "\n execute hadoop task intertval seconds: " + exeHadoopTaskseconds);
+		lastTimeMillis = System.currentTimeMillis();
+		exeHadoopTasklastTimeMillis = System.currentTimeMillis();
+		
+		new Thread(new Runnable() {
+
+			@Override
+			public void run() {
+				while (running) {
+					long currentTimeMillis = System.currentTimeMillis();
+					
+					if (currentTimeMillis - lastTimeMillis > 1000 * seconds) {
+						lastTimeMillis = currentTimeMillis;
+						
+						if (copyFileToHDFS()) {
+							log.info("put file to hdfs successful!");
+						}
+					}
+					long exeHadoopTaskcurrentTimeMillis = System.currentTimeMillis();
+					if (exeHadoopTaskcurrentTimeMillis - exeHadoopTasklastTimeMillis > 1000 * exeHadoopTaskseconds) {
+						exeHadoopTasklastTimeMillis = exeHadoopTaskcurrentTimeMillis;	
+						
+						String inputDirPath = getNameNode().trim() + "/" + getOutputFilePath().trim() + "/" + tmpHdfsPathDir + "/input";
+						String outputDirPath = getNameNode().trim() + "/" + getOutputFilePath().trim() + "/" + tmpHdfsPathDir + "/output";
+						
+						FileSystem hdfsFileSystem = getFileSystem();
+						if (null == hdfsFileSystem) {
+							log.error("Connect to FileSystem failure.");
+						}
+						
+						boolean empty = false;
+						try {
+							empty = hdfsFileSystem.listStatus(new Path(inputDirPath)).length == 0;
+						} catch (IOException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						} finally {
+							try {
+								hdfsFileSystem.close();
+							} catch (IOException e) {
+								e.printStackTrace();
+							}
+						}
+						if (!empty) {
+							HdfsService.startMapReduce(gethadoopCmdPath().trim(), getJobPath().trim(), inputDirPath, outputDirPath, args);
+							File nameListFile = new File(getInputFilePath());
+							nameListFile = new File(nameListFile.getParent() + "/namelistfile.txt");
+							saveNameList(nameListFile, "inputDirPath:" + inputDirPath + "\n" + "outputDirPath:" + outputDirPath + "\n");
+							tmpHdfsPathDir = DateUtil.date2String(new Date());
+						}
+					}
+				}
+			}
+		}).start();
+	}
+	
+	@Override
+	public void testEnded() {
+		super.testEnded();
+
+		running = false;
+
+		if (copyFileToHDFS()) {
+			log.info("put file to hdfs successful!");
+		}
+		
+		beginNum = 0L;
+		endNum = 0L;
+		lastTimeMillis = System.currentTimeMillis();
+	}
 
 	private boolean copyFileToHDFS() {
 
-		FileSystem hdfsFileSystem = null;
-		Configuration config = new Configuration();
 		Exception exception = null;
-		config.set("fs.default.name", this.getNameNode().trim());
 		
-		for (int i = 0; i < CONNECT_TIMES; i++) {
-			try {
-				hdfsFileSystem = FileSystem.get(config);
-			} catch (IOException e1) {
-				exception = e1;
-				e1.printStackTrace();
-			}
-			if (null != hdfsFileSystem) {
-				break;
-			}
-		}
-		
+		FileSystem hdfsFileSystem = getFileSystem();
 		if (null == hdfsFileSystem) {
 			log.error("Connect to FileSystem failure.");
 		}
@@ -68,15 +180,10 @@ public class HdfsOperation extends ResultCollector {
 					&& StringUtils.isNotBlank(this.getOutputFilePath())
 					&& StringUtils.isNotBlank(getInterval())) {
 
-				// create tmp directory
-				File file = new File("/tmp/jmeter-plugin-"
-						+ DateUtil.date2String(new Date()));
-				FileUtil.createDir(file);
-
 				String filename = "jmeter-" + DateUtil.date2String(new Date())
 						+ ".txt";
 				File srcFile = new File(this.getInputFilePath().trim());
-				File desFile = new File(file.getAbsoluteFile() + "/" + filename);
+				File desFile = new File(tmpDir.getAbsoluteFile() + "/" + filename);
 				FileUtil.createFile(desFile);
 				
 				Partion partion = new Partion();
@@ -91,8 +198,8 @@ public class HdfsOperation extends ResultCollector {
 					}
 					
 					Path from = new Path(desFile.getAbsolutePath());
-					Path to = new Path(this.getOutputFilePath().trim() + "/"
-							+ filename);
+					Path to = new Path(this.getNameNode().trim() + "/" + this.getOutputFilePath().trim() + "/"
+							+ tmpHdfsPathDir + "/input" + "/" + filename);
 					hdfsFileSystem.copyFromLocalFile(from, to);
 					log.info("put file:" + from.getName() + " to hdfs successful!");
 					desFile.delete();
@@ -123,56 +230,34 @@ public class HdfsOperation extends ResultCollector {
 		return true;
 	}
 	
-	@Override
-	public void testStarted() {
-		super.testStarted();
-		running = true;
+	private FileSystem getFileSystem() {
+		FileSystem hdfsFileSystem = null;
+		Configuration config = new Configuration();
 		
-		Partion partion = new Partion();
-		long lines = partion.getLines(new File(getInputFilePath()));
-		if (lines > 0) {
-			beginNum = lines + 1;
-			endNum = lines;
-		} else {
-			beginNum = 1L;
-			endNum = 0L;
+		config.set("fs.default.name", this.getNameNode().trim());
+		
+		for (int i = 0; i < CONNECT_TIMES; i++) {
+			try {
+				hdfsFileSystem = FileSystem.get(config);
+			} catch (IOException e1) {
+				e1.printStackTrace();
+			}
+			if (null != hdfsFileSystem) {
+				break;
+			}
 		}
 		
-		File nameListFile = new File(getInputFilePath().trim());
-		nameListFile = new File(nameListFile.getParent() + "/namelistfile.txt");
-		saveNameList(nameListFile);
-		
-		final int seconds = Integer.parseInt(getInterval().trim());
-		log.info("interval seconds: " +seconds);
-		lastTimeMillis = System.currentTimeMillis();
-		
-		new Thread(new Runnable() {
-
-			@Override
-			public void run() {
-				while (running) {
-					long currentTimeMillis = System.currentTimeMillis();
-
-					if (currentTimeMillis - lastTimeMillis > 1000 * seconds) {
-						lastTimeMillis = currentTimeMillis;
-						
-						if (copyFileToHDFS()) {
-							log.info("put file to hdfs successful!");
-						}
-					}
-				}
-			}
-		}).start();
+		return hdfsFileSystem;
 	}
-
-	private void saveNameList(File nameListFile) {
+	
+	private void saveNameList(File nameListFile, String contents) {
 		
 		FileUtil.createFile(nameListFile);
 		OutputStream out = null;
 		try {
-			out = new FileOutputStream(nameListFile);
+			out = new FileOutputStream(nameListFile, true);
 			try {
-				out.write(printableFieldNamesToString().getBytes());
+				out.write(contents.getBytes());
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -186,40 +271,6 @@ public class HdfsOperation extends ResultCollector {
 				e.printStackTrace();
 			}
 		}
-	}
-
-	@Override
-	public void testEnded() {
-		super.testEnded();
-
-		running = false;
-
-		if (copyFileToHDFS()) {
-			log.info("put file to hdfs successful!");
-		}
-		
-		beginNum = 0L;
-		endNum = 0L;
-		lastTimeMillis = System.currentTimeMillis();
-	}
-
-	public String printableFieldNamesToString() {
-		return this.printableFieldNamesToString(super.getSaveConfig());
-	}
-
-	/**
-	 * print file head list
-	 * 
-	 * @param c
-	 *            the configurations you selected
-	 * @return
-	 */
-	public String printableFieldNamesToString(SampleSaveConfiguration c) {
-		return CSVSaveService.printableFieldNamesToString(c);
-	}
-
-	public HdfsOperation() {
-		super();
 	}
 
 	public String getNameNode() {
@@ -252,5 +303,29 @@ public class HdfsOperation extends ResultCollector {
 
 	public void setInterval(String value) {
 		this.setProperty(INTERVAL, value);
+	}
+	
+	public String gethadoopCmdPath() {
+		return this.getPropertyAsString(HADOOP_CMD_PATH);
+	}
+
+	public void sethadoopCmdPath(String value) {
+		this.setProperty(HADOOP_CMD_PATH, value);
+	}
+	
+	public String getJobPath() {
+		return this.getPropertyAsString(JOB_PATH);
+	}
+
+	public void setJobPath(String value) {
+		this.setProperty(JOB_PATH, value);
+	}
+	
+	public String getExeHadoopTaskInterval() {
+		return this.getPropertyAsString(EXE_HADOOP_TASK_INTERVAL);
+	}
+
+	public void setExeHadoopTaskInterval(String value) {
+		this.setProperty(EXE_HADOOP_TASK_INTERVAL, value);
 	}
 }
