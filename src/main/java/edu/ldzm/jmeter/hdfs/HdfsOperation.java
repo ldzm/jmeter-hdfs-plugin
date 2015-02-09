@@ -43,6 +43,10 @@ public class HdfsOperation extends ResultCollector {
 
 	private static File tmpDir = new File("/tmp/jmeter-plugin-" + DateUtil.date2String(new Date()));
 	private static String tmpHdfsPathDir = DateUtil.date2String(new Date());
+	private static int seconds = 0;
+	private static int exeHadoopTaskseconds = 0;
+	private static List<String> args = new ArrayList<String>();
+	
 	private static boolean running = true;
 	public static long beginNum = 0L;
 	public static long endNum = 0L;
@@ -52,6 +56,12 @@ public class HdfsOperation extends ResultCollector {
 	public HdfsOperation() {
 		super();
 		FileUtil.createDir(tmpDir);
+		seconds = Integer.parseInt(getInterval().trim());
+		exeHadoopTaskseconds = Integer.parseInt(getExeHadoopTaskInterval().trim());
+		args.add("-l");
+		args.add(printableFieldNamesToString());
+		args.add("-i");
+		args.add(seconds + "");
 	}
 	
 	public String printableFieldNamesToString() {
@@ -83,16 +93,8 @@ public class HdfsOperation extends ResultCollector {
 			beginNum = 1L;
 			endNum = 0L;
 		}
-		
-		
-		final int seconds = Integer.parseInt(getInterval().trim());
-		final int exeHadoopTaskseconds = Integer.parseInt(getExeHadoopTaskInterval().trim());
+
 		tmpHdfsPathDir = DateUtil.date2String(new Date());
-		final List<String> args = new ArrayList<String>();
-		args.add("-l");
-		args.add(printableFieldNamesToString());
-		args.add("-i");
-		args.add(exeHadoopTaskseconds + "");
 		
 		log.info("interval seconds: " +seconds + "\n execute hadoop task intertval seconds: " + exeHadoopTaskseconds);
 		lastTimeMillis = System.currentTimeMillis();
@@ -116,40 +118,44 @@ public class HdfsOperation extends ResultCollector {
 					if (exeHadoopTaskcurrentTimeMillis - exeHadoopTasklastTimeMillis > 1000 * exeHadoopTaskseconds) {
 						exeHadoopTasklastTimeMillis = exeHadoopTaskcurrentTimeMillis;	
 						
-						String inputDirPath = getNameNode().trim() + "/" + getOutputFilePath().trim() + "/" + tmpHdfsPathDir + "/input";
-						String outputDirPath = getNameNode().trim() + "/" + getOutputFilePath().trim() + "/" + tmpHdfsPathDir + "/output";
-						
-						FileSystem hdfsFileSystem = getFileSystem();
-						if (null == hdfsFileSystem) {
-							log.error("Connect to FileSystem failure.");
-						}
-						
-						boolean empty = false;
-						try {
-							empty = hdfsFileSystem.listStatus(new Path(inputDirPath)).length == 0;
-						} catch (IOException e) {
-							// TODO Auto-generated catch block
-							e.printStackTrace();
-						} finally {
-							try {
-								hdfsFileSystem.close();
-							} catch (IOException e) {
-								e.printStackTrace();
-							}
-						}
-						if (!empty) {
-							HdfsService.startMapReduce(gethadoopCmdPath().trim(), getJobPath().trim(), inputDirPath, outputDirPath, args);
-							File nameListFile = new File(getInputFilePath());
-							nameListFile = new File(nameListFile.getParent() + "/namelistfile.txt");
-							saveNameList(nameListFile, "inputDirPath:" + inputDirPath + "\n" + "outputDirPath:" + outputDirPath + "\n");
-							tmpHdfsPathDir = DateUtil.date2String(new Date());
-						}
+						startMapReduce(args);
 					}
 				}
 			}
+
+			
 		}).start();
 	}
-	
+	private void startMapReduce(final List<String> args) {
+		String inputDirPath = getNameNode().trim() + getOutputFilePath().trim() + tmpHdfsPathDir + "/input";
+		String outputDirPath = getNameNode().trim() + getOutputFilePath().trim() + tmpHdfsPathDir + "/output";
+		
+		FileSystem hdfsFileSystem = getFileSystem();
+		if (null == hdfsFileSystem) {
+			log.error("Connect to FileSystem failure.");
+		}
+		
+		boolean empty = false;
+		try {
+			empty = hdfsFileSystem.listStatus(new Path(inputDirPath)).length == 0;
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} finally {
+			try {
+				hdfsFileSystem.close();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+		if (!empty) {
+			HdfsService.startMapReduce(gethadoopCmdPath().trim(), getJobPath().trim(), inputDirPath, outputDirPath, args);
+			File nameListFile = new File(getInputFilePath());
+			nameListFile = new File(nameListFile.getParent() + "/namelistfile.txt");
+			saveNameList(nameListFile, "inputDirPath:" + inputDirPath + "\n" + "outputDirPath:" + outputDirPath + "\n");
+			tmpHdfsPathDir = DateUtil.date2String(new Date());
+		}
+	}
 	@Override
 	public void testEnded() {
 		super.testEnded();
@@ -158,6 +164,8 @@ public class HdfsOperation extends ResultCollector {
 
 		if (copyFileToHDFS()) {
 			log.info("put file to hdfs successful!");
+			
+			startMapReduce(args);
 		}
 		
 		beginNum = 0L;
